@@ -14,6 +14,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "Tilengine.h"
 #include "Tileset.h"
 #include "Palette.h"
@@ -24,7 +25,7 @@ static bool HasTransparentPixels (uint8_t* src, int width);
 
 /*!
  * \brief
- * Creates a new tileset
+ * Creates a tile-based tileset
  * 
  * \param numtiles
  * Number of tiles that the tileset will hold
@@ -82,8 +83,12 @@ TLN_Tileset TLN_CreateTileset (int numtiles, int width, int height, TLN_Palette 
 	size = sizeof(struct Tileset) + size_tiles + size_color + size_attributes;
 	tileset = (TLN_Tileset)CreateBaseObject (OT_TILESET, size);
 	if (!tileset)
+	{
+		TLN_SetLastError(TLN_ERR_OUT_OF_MEMORY);
 		return NULL;
+	}
 
+	tileset->tstype = TILESET_TILES;
 	tileset->width = width;
 	tileset->height = height;
 	tileset->hshift = hshift;
@@ -99,6 +104,10 @@ TLN_Tileset TLN_CreateTileset (int numtiles, int width, int height, TLN_Palette 
 	tileset->attributes = (TLN_TileAttributes*)(tileset->data + tileset->size_tiles + tileset->size_color);
 	if (attributes != NULL)
 		memcpy (tileset->attributes, attributes, size_attributes);
+
+	/* create animations */
+	if (sp != NULL)
+		tileset->animations = calloc(sp->num_sequences, sizeof(Animation));
 	
 	TLN_SetLastError (TLN_ERR_OK);
 	return tileset;
@@ -106,7 +115,41 @@ TLN_Tileset TLN_CreateTileset (int numtiles, int width, int height, TLN_Palette 
 
 /*!
  * \brief
- * Sets pixel data for a tile in a tileset
+ * Creates a multiple image-based tileset
+ *
+ * \param numtiles
+ * Number of tiles that the tileset will hold
+ *
+ * \param images
+ * Array of image structures, one for each tile. Can be NULL
+ *
+ * \returns
+ * Reference to the created tileset, or NULL if error
+  */
+
+TLN_Tileset TLN_CreateImageTileset(int numtiles, TLN_TileImage* images)
+{
+	TLN_Tileset tileset;
+	const int images_size = numtiles * sizeof(TLN_TileImage);
+	const int size = sizeof(struct Tileset) + images_size;
+
+	tileset = CreateBaseObject(OT_TILESET, size);
+	if (tileset == NULL)
+	{
+		TLN_SetLastError(TLN_ERR_OUT_OF_MEMORY);
+		return NULL;
+	}
+
+	tileset->tstype = TILESET_IMAGES;
+	tileset->numtiles = numtiles;
+	tileset->images = (TLN_TileImage*)tileset->data;
+	memcpy(tileset->images, images, images_size);
+	return tileset;
+}
+
+/*!
+ * \brief
+ * Sets pixel data for a tile in a tile-based tileset
  * 
  * \param tileset
  * Reference to the tileset
@@ -137,9 +180,9 @@ bool TLN_SetTilesetPixels (TLN_Tileset tileset, int entry, uint8_t* srcdata, int
 	if (!CheckBaseObject (tileset, OT_TILESET))
 		return false;
 
-	if (entry<1 || entry>tileset->numtiles)
+	if (tileset->tstype != TILESET_TILES || entry<1 || entry>tileset->numtiles)
 	{
-		TLN_SetLastError (TLN_ERR_IDX_PICTURE);
+		TLN_SetLastError(TLN_ERR_IDX_PICTURE);
 		return false;
 	}
 
@@ -361,8 +404,6 @@ bool TLN_CopyTile (TLN_Tileset tileset, int src, int dst)
 		return false;
 	}
 
-	src += 1;
-	dst += 1;
 	tilesize = tileset->width * tileset->height;
 	srcdata = tileset->data + (src * tilesize);
 	dstdata = tileset->data + (dst * tilesize);
@@ -371,6 +412,21 @@ bool TLN_CopyTile (TLN_Tileset tileset, int src, int dst)
 
 	TLN_SetLastError (TLN_ERR_OK);
 	return true;
+}
+
+/* for image-based tilesets: returns bitmap with matching tileid */
+TLN_Bitmap GetTilesetBitmap(TLN_Tileset tileset, int tileid)
+{
+	int c;
+	if (!CheckBaseObject(tileset, OT_TILESET) || tileset->tstype != TILESET_IMAGES)
+		return NULL;
+
+	for (c = 0; c < tileset->numtiles; c += 1)
+	{
+		if (tileset->images[c].id == tileid)
+			return tileset->images[c].bitmap;
+	}
+	return NULL;
 }
 
 /* devuelve si la línea usa color key */

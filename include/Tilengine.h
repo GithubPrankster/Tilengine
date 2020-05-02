@@ -59,8 +59,8 @@
 
 /* version */
 #define TILENGINE_VER_MAJ	2
-#define TILENGINE_VER_MIN	4
-#define TILENGINE_VER_REV	2
+#define TILENGINE_VER_MIN	8
+#define TILENGINE_VER_REV	0
 #define TILENGINE_HEADER_VERSION ((TILENGINE_VER_MAJ << 16) | (TILENGINE_VER_MIN << 8) | TILENGINE_VER_REV)
 
 #define BITVAL(n) (1<<(n))
@@ -185,6 +185,19 @@ typedef struct
 }
 TLN_TileInfo;
 
+/*! Object item info returned by TLN_GetObjectInfo() */
+typedef struct
+{
+	uint16_t id;	/*!< unique ID */
+	uint16_t gid;	/*!< graphic ID (tile index) */
+	uint16_t flags;	/*!< attributes (FLAG_FLIPX, FLAG_FLIPY, FLAG_PRIORITY) */
+	int x;			/*!< horizontal position */
+	int y;			/*!< vertical position */
+	int width;		/*!< horizontal size */
+	int height;		/*!< vertical size */
+}
+TLN_ObjectInfo;
+
 /*! Tileset attributes for TLN_CreateTileset() */
 typedef struct
 {
@@ -192,18 +205,6 @@ typedef struct
 	bool	priority;	/*!< priority flag set */
 }
 TLN_TileAttributes;
-
-/*! ObjectList item for TLN_CreateObjectList() */
-typedef struct
-{
-	int id;		/*!< object unique identifier */
-	int gid;	/*!< graphic identifier (tile index in Tiled) */
-	int x;
-	int y;
-	int width;
-	int height;
-}
-TLN_Object;
 
 /*! overlays for CRT effect */
 typedef enum
@@ -235,6 +236,15 @@ typedef struct Sequence*	 TLN_Sequence;			/*!< Opaque sequence reference */
 typedef struct SequencePack* TLN_SequencePack;		/*!< Opaque sequence pack reference */
 typedef struct Bitmap*		 TLN_Bitmap;			/*!< Opaque bitmap reference */
 typedef struct ObjectList*	 TLN_ObjectList;		/*!< Opaque object list reference */
+
+/*! Image Tile items for TLN_CreateImageTileset() */
+typedef struct
+{
+	TLN_Bitmap bitmap;
+	uint16_t id;
+	uint8_t	type;
+}
+TLN_TileImage;
 
 /*! Sprite state */
 typedef struct
@@ -337,6 +347,7 @@ typedef enum
 	TLN_ERR_WRONG_FORMAT,	/*!< Resource file has invalid format */
 	TLN_ERR_WRONG_SIZE,		/*!< A width or height parameter is invalid */
 	TLN_ERR_UNSUPPORTED,	/*!< Unsupported function */
+	TLN_ERR_REF_LIST,		/*!< Invalid TLN_ObjectList reference */
 	TLN_MAX_ERR,
 }
 TLN_Error;
@@ -450,6 +461,7 @@ TLNAPI bool TLN_DeleteSpriteset (TLN_Spriteset Spriteset);
  * \brief Tileset resources management for background layers 
 * @{ */
 TLNAPI TLN_Tileset TLN_CreateTileset (int numtiles, int width, int height, TLN_Palette palette, TLN_SequencePack sp, TLN_TileAttributes* attributes);
+TLNAPI TLN_Tileset TLN_CreateImageTileset(int numtiles, TLN_TileImage* images);
 TLNAPI TLN_Tileset TLN_LoadTileset (const char* filename);
 TLNAPI TLN_Tileset TLN_CloneTileset (TLN_Tileset src);
 TLNAPI bool TLN_SetTilesetPixels (TLN_Tileset tileset, int entry, uint8_t* srcdata, int srcpitch);
@@ -516,11 +528,11 @@ TLNAPI bool TLN_DeleteBitmap (TLN_Bitmap bitmap);
  * \brief ObjectList resources management
  * @{ */
 TLNAPI TLN_ObjectList TLN_CreateObjectList(void);
-TLNAPI bool TLN_AddObjectToList(TLN_ObjectList list, TLN_Object* data);
-TLNAPI bool TLN_AddSpriteToList(TLN_ObjectList list, TLN_Spriteset spriteset, const char* name, int id, int x, int y);
-TLNAPI TLN_ObjectList TLN_LoadObjectList(const char* filename, const char* layername, int firstgid);
+TLNAPI bool TLN_AddTileObjectToList(TLN_ObjectList list, uint16_t id, uint16_t gid, uint16_t flags, int x, int y);
+TLNAPI TLN_ObjectList TLN_LoadObjectList(const char* filename, const char* layername);
 TLNAPI TLN_ObjectList TLN_CloneObjectList(TLN_ObjectList src);
-TLNAPI int TLN_GetObjectsInReigion(TLN_ObjectList list, int x, int y, int width, int height, int array_size, TLN_Object* objects[]);
+TLNAPI int TLN_GetListNumObjects(TLN_ObjectList list);
+TLNAPI bool TLN_GetListObject(TLN_ObjectList list, TLN_ObjectInfo* info);
 TLNAPI bool TLN_DeleteObjectList(TLN_ObjectList list);
 /**@}*/
 
@@ -543,7 +555,7 @@ TLNAPI bool TLN_DisableLayerClip (int nlayer);
 TLNAPI bool TLN_SetLayerMosaic (int nlayer, int width, int height);
 TLNAPI bool TLN_DisableLayerMosaic (int nlayer);
 TLNAPI bool TLN_ResetLayerMode (int nlayer);
-TLNAPI bool TLN_SetLayerObjects(int nlayer, TLN_ObjectList objects, TLN_Spriteset spriteset, int width, int height);
+TLNAPI bool TLN_SetLayerObjects(int nlayer, TLN_ObjectList objects, TLN_Tileset tileset);
 TLNAPI bool TLN_SetLayerPriority(int nlayer, bool enable);
 TLNAPI bool TLN_SetLayerParent(int nlayer, int parent);
 TLNAPI bool TLN_DisableLayerParent(int nlayer);
@@ -575,6 +587,10 @@ TLNAPI int  TLN_GetAvailableSprite (void);
 TLNAPI bool TLN_EnableSpriteCollision (int nsprite, bool enable);
 TLNAPI bool TLN_GetSpriteCollision (int nsprite);
 TLNAPI bool TLN_GetSpriteState(int nsprite, TLN_SpriteState* state);
+TLNAPI bool TLN_SetFirstSprite(int nsprite);
+TLNAPI bool TLN_SetNextSprite(int nsprite, int next);
+TLNAPI bool TLN_EnableSpriteMasking(int nsprite, bool enable);
+TLNAPI void TLN_SetSpritesMaskRegion(int top_line, int bottom_line);
 TLNAPI bool TLN_DisableSprite (int nsprite);
 TLNAPI TLN_Palette TLN_GetSpritePalette (int nsprite);
 /**@}*/
@@ -585,7 +601,7 @@ TLNAPI TLN_Palette TLN_GetSpritePalette (int nsprite);
 * @{ */
 TLNAPI TLN_Sequence TLN_CreateSequence (const char* name, int target, int num_frames, TLN_SequenceFrame* frames);
 TLNAPI TLN_Sequence TLN_CreateCycle (const char* name, int num_strips, TLN_ColorStrip* strips);
-TLNAPI TLN_Sequence TLN_CreateSpriteSequence(const char* name, TLN_Spriteset spriteset, char* basename, int count, int delay);
+TLNAPI TLN_Sequence TLN_CreateSpriteSequence(const char* name, TLN_Spriteset spriteset, const char* basename, int delay);
 TLNAPI TLN_Sequence TLN_CloneSequence (TLN_Sequence src);
 TLNAPI bool TLN_GetSequenceInfo (TLN_Sequence sequence, TLN_SequenceInfo* info);
 TLNAPI bool TLN_DeleteSequence (TLN_Sequence sequence);
@@ -610,13 +626,12 @@ TLNAPI bool TLN_DeleteSequencePack (TLN_SequencePack sp);
 * @{ */
 TLNAPI bool TLN_SetPaletteAnimation (int index, TLN_Palette palette, TLN_Sequence sequence, bool blend);
 TLNAPI bool TLN_SetPaletteAnimationSource (int index, TLN_Palette);
-TLNAPI bool TLN_SetTilesetAnimation (int index, int nlayer, TLN_Sequence);
-TLNAPI bool TLN_SetTilemapAnimation (int index, int nlayer, TLN_Sequence);
-TLNAPI bool TLN_SetSpriteAnimation (int index, int nsprite, TLN_Sequence sequence, int loop);
+TLNAPI bool TLN_SetSpriteAnimation (int nsprite, TLN_Sequence sequence, int loop);
 TLNAPI bool TLN_GetAnimationState (int index);
 TLNAPI bool TLN_SetAnimationDelay (int index, int delay);
 TLNAPI int  TLN_GetAvailableAnimation (void);
-TLNAPI bool TLN_DisableAnimation (int index);
+TLNAPI bool TLN_DisablePaletteAnimation(int index);
+TLNAPI bool TLN_DisableSpriteAnimation(int index);
 /**@}*/
 
 #ifdef __cplusplus

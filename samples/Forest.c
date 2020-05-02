@@ -25,41 +25,58 @@ enum
 {
 	LAYER_PROPS_FRONT,	/* props in front of sprites */
 	LAYER_FOREGROUND,	/* main foreground layer (tiles) */
-	LAYER_PROPS_BACK,	/* props behind sprites */
+	LAYER_PROPS,		/* object layer */
 	LAYER_MIDDLEGROUND,	/* middle (bitmap) */
 	LAYER_BACKGROUND,	/* back ( bitmap) */
 	NUM_LAYERS
 };
-
-/* ported from PhaserEngine demo code: x and y are tile coordinates (16 pixels side)  */
-static void addProp(TLN_ObjectList list, TLN_Spriteset spriteset, double x, double y, char* name)
-{
-	TLN_AddSpriteToList(list, spriteset, name, 0, (int)(x * 16), (int)(y * 16));
-}
 
 int main(int argc, char* argv[])
 {
 	int frame = 0;
 	TLN_Tilemap foreground;
 	TLN_Bitmap middleground, background;
-	TLN_ObjectList props_list_front, props_list;
-	TLN_Spriteset atlas_props;
-	TLN_Spriteset player;
+	TLN_ObjectList props_list;
+	TLN_Spriteset atlas;
 	TLN_Sequence idle, skip;
 	int xworld = 0;
 	int xplayer, yplayer;
 	int oldx = -1;
 	int width, height;
+	TLN_ObjectInfo info = {0};
+	bool ok;
+	char* respack = NULL;
+	char* passkey = NULL;
+	
+	/* get arguments */
+	if (argc > 1)
+		respack = argv[1];
+	if (argc > 2)
+		passkey = argv[2];
 
-	TLN_Init(HRES, VRES, NUM_LAYERS, 8, 8);
+	TLN_Init(HRES, VRES, NUM_LAYERS, 8, 0);
 
 	/* load assets */
-	TLN_SetLoadPath("assets/forest");
-	atlas_props = TLN_LoadSpriteset("atlas-props");
+	TLN_SetLogLevel(TLN_LOG_ERRORS);
+	if (respack != NULL)
+	{
+		ok = TLN_OpenResourcePack(respack, passkey);
+		if (!ok)
+		{
+			printf("Cannot open resource pack!\n");
+			TLN_Deinit();
+			return 0;
+		}
+		TLN_SetLoadPath("forest");
+	}
+	else
+		TLN_SetLoadPath("assets/forest");
+	
 	foreground = TLN_LoadTilemap("map.tmx", "Main Layer");
 	middleground = TLN_LoadBitmap("middleground.png");
 	background = TLN_LoadBitmap("background.png");
-	player = TLN_LoadSpriteset("player");
+	atlas = TLN_LoadSpriteset("atlas.png");
+	props_list = TLN_LoadObjectList("map.tmx", NULL);
 
 	/* setup layers */
 	TLN_SetLayer(LAYER_FOREGROUND, NULL, foreground);
@@ -69,47 +86,30 @@ int main(int argc, char* argv[])
 	height = TLN_GetLayerHeight(LAYER_FOREGROUND);
 
 	/* objects layer: add front objects (in front of sprites) */
-	props_list_front = TLN_CreateObjectList();
-	addProp(props_list_front, atlas_props,  16, 12.7, "rock");
-	addProp(props_list_front, atlas_props,   2, 12.0, "plant");
-	addProp(props_list_front, atlas_props,  23, 12.0, "plant");
-	addProp(props_list_front, atlas_props,  53, 11.7, "rock");
-	addProp(props_list_front, atlas_props, 150, 12.0, "plant");
-	addProp(props_list_front, atlas_props, 152, 12.0, "plant");
-	addProp(props_list_front, atlas_props, 143, 12.0, "plant");
-	addProp(props_list_front, atlas_props, 119, 12.0, "plant");
-	addProp(props_list_front, atlas_props, 122, 12.5, "rock");
-	TLN_SetLayerObjects(LAYER_PROPS_FRONT, props_list_front, atlas_props, width, height);
-	TLN_SetLayerPriority(LAYER_PROPS_FRONT, true);
+	printf("pops_list length = %d\n", TLN_GetListNumObjects(props_list));
+	ok = TLN_GetListObject(props_list, &info);
+	while (ok)
+	{
+		printf("object id=%d gid=%d x=%d y=%d w=%d h=%d\n", info.id, info.gid, info.x, info.y, info.width, info.height);
+		ok = TLN_GetListObject(props_list, NULL);
+	}
 
 	/* objects layer: add back objects (behind sprites) */
-	props_list = TLN_CreateObjectList();
-	addProp(props_list, atlas_props,   1,  0.2, "tree");
-	addProp(props_list, atlas_props,  11, 10.3, "mushroom-red");
-	addProp(props_list, atlas_props,   3,  0.0, "vine");
-	addProp(props_list, atlas_props,  25,  0.0, "vine");
-	addProp(props_list, atlas_props,  17, 11.0, "mushroom-brown");
-	addProp(props_list, atlas_props, 120,  0.2, "tree");
-	addProp(props_list, atlas_props, 146,  2.7, "house");
-	addProp(props_list, atlas_props, 130,  0.0, "vine");
-	addProp(props_list, atlas_props, 136,  0.0, "vine");
-	addProp(props_list, atlas_props, 144, 11.3, "mushroom-red");
-	addProp(props_list, atlas_props, 140, 11.3, "mushroom-brown");
-	TLN_SetLayerObjects(LAYER_PROPS_BACK, props_list, atlas_props, width, height);
+	TLN_SetLayerObjects(LAYER_PROPS, props_list, NULL);
 
 	/* sync props layer positions to main layer */
 	TLN_SetLayerParent(LAYER_PROPS_FRONT, LAYER_FOREGROUND);
-	TLN_SetLayerParent(LAYER_PROPS_BACK, LAYER_FOREGROUND);
+	TLN_SetLayerParent(LAYER_PROPS, LAYER_FOREGROUND);
 
 	/* create sprite sequences */
-	idle = TLN_CreateSpriteSequence(NULL, player, "player-idle-", 9, 6);
-	skip = TLN_CreateSpriteSequence(NULL, player, "player-skip-", 8, 6);
+	idle = TLN_CreateSpriteSequence(NULL, atlas, "player-idle/player-idle-", 6);
+	skip = TLN_CreateSpriteSequence(NULL, atlas, "player-skip/player-skip-", 6);
 	
 	/* setup main player sprite */
 	xplayer = 48;
 	yplayer = 144;
-	TLN_ConfigSprite(0, player, 0);
-	TLN_SetSpriteAnimation(0, 0, idle, 0);
+	TLN_ConfigSprite(0, atlas, 0);
+	TLN_SetSpriteAnimation(0, idle, 0);
 
 	/* create window & main loop */
 	TLN_CreateWindow(NULL, 0);
@@ -135,6 +135,7 @@ int main(int argc, char* argv[])
 		}
 	}
 	TLN_DeleteWindow();
+	TLN_CloseResourcePack();
 	TLN_Deinit();
 	return 0;
 }

@@ -21,6 +21,18 @@
 static void DrawSpriteCollision (int nsprite, uint8_t *srcpixel, uint16_t *dstpixel, int width, int dx);
 static void DrawSpriteCollisionScaling (int nsprite, uint8_t *srcpixel, uint16_t *dstpixel, int width, int dx, int srcx);
 
+static bool check_sprite_coverage(Sprite* sprite, int nscan)
+{
+	/* check sprite coverage */
+	if (nscan < sprite->dstrect.y1 || nscan >= sprite->dstrect.y2)
+		return false;
+	if (sprite->dstrect.x2 < 0 || sprite->srcrect.x2 < 0)
+		return false;
+	if (sprite->masking && nscan >= engine->sprite_mask_top && nscan <= engine->sprite_mask_bottom)
+		return false;
+	return true;
+}
+
 /*!
  * \brief Draws the next scanline of the frame started with TLN_BeginFrame() or TLN_BeginWindowFrame()
  * \remarks Use this function in conjunction with TLN_BeginFrame() (custom render target) or 
@@ -33,8 +45,10 @@ bool TLN_DrawNextScanline(void)
 	uint8_t* scan = GetFramebufferLine(line);
 	int size = engine->framebuffer.width;
 	int c;
+	int index;
 	bool background_priority = false;
 	bool sprite_priority = false;
+	List* list;
 
 	/* call raster effect callback */
 	if (engine->raster)
@@ -77,16 +91,19 @@ bool TLN_DrawNextScanline(void)
 	}
 
 	/* draw regular sprites */
-	for (c = 0; c < engine->numsprites; c++)
+	list = &engine->list_sprites;
+	index = list->first;
+	while (index != -1)
 	{
-		Sprite* sprite = &engine->sprites[c];
-		if (sprite->ok)
+		Sprite* sprite = &engine->sprites[index];
+		if (check_sprite_coverage(sprite, line))
 		{
 			if (!(sprite->flags & FLAG_PRIORITY))
-				engine->sprites[c].draw(c, line);
+				sprite->draw(index, line);
 			else
 				sprite_priority = true;
 		}
+		index = sprite->list_node.next;
 	}
 
 	/* draw background layers with priority */
@@ -114,11 +131,13 @@ bool TLN_DrawNextScanline(void)
 	/* draw sprites with priority */
 	if (sprite_priority == true)
 	{
-		for (c = 0; c < engine->numsprites; c++)
+		index = list->first;
+		while (index != -1)
 		{
-			Sprite* sprite = &engine->sprites[c];
-			if (sprite->ok && (sprite->flags & FLAG_PRIORITY))
-				engine->sprites[c].draw(c, line);
+			Sprite* sprite = &engine->sprites[index];
+			if (check_sprite_coverage(sprite, line) && (sprite->flags & FLAG_PRIORITY))
+				sprite->draw(index, line);
+			index = sprite->list_node.next;
 		}
 	}
 
@@ -629,13 +648,6 @@ static bool DrawSpriteScanline (int nsprite, int nscan)
 	int direction;
 
 	sprite = &engine->sprites[nsprite];
-
-	/* check sprite coverage */
-	if (nscan<sprite->dstrect.y1 || nscan>=sprite->dstrect.y2)
-		return false;
-	if (sprite->dstrect.x2 < 0 || sprite->srcrect.x2 < 0)
-		return false;
-
 	dstscan = GetFramebufferLine(nscan);
 		
 	srcx = sprite->srcrect.x1;
@@ -677,12 +689,6 @@ static bool DrawScalingSpriteScanline (int nsprite, int nscan)
 	struct Palette* palette;
 
 	sprite = &engine->sprites[nsprite];
-
-	/* check sprite coverage */
-	if (nscan<sprite->dstrect.y1 || nscan>=sprite->dstrect.y2)
-		return false;
-	if (sprite->dstrect.x2 < 0 || sprite->srcrect.x2 < 0)
-		return false;
 
 	dstscan = GetFramebufferLine(nscan);
 	srcx = sprite->srcrect.x1;
@@ -1156,23 +1162,25 @@ static bool DrawLayerObjectScanline(int nlayer, int nscan)
 	int x2 = layer->hstart + layer->clip.x2;
 	int y = layer->vstart + nscan;
 	uint8_t* dstscan = GetFramebufferLine(nscan);
-	uint8_t* pixels = layer->spriteset->bitmap->data;
-	uint32_t pitch = layer->spriteset->bitmap->pitch;
+	bool priority = false;
 
 	while (object != NULL)
 	{
-		if (IsObjectInLine(object, x1, x2, y))
+		if (IsObjectInLine(object, x1, x2, y) && object->bitmap != NULL)
 		{
 			int w;
 			uint8_t *srcpixel;
+			uint8_t *target;
 			uint32_t *dstpixel;
+			TLN_Bitmap bitmap = object->bitmap;
 			int srcx, srcy;
 			int dstx1, dstx2;
+			int direction = 1;
 
 			srcx = 0;
-			srcy = y - object->data.y;
-			dstx1 = object->data.x - x1;
-			dstx2 = dstx1 + object->data.width;
+			srcy = y - object->y;
+			dstx1 = object->x - x1;
+			dstx2 = dstx1 + object->width;
 			if (dstx1 < layer->clip.x1)
 			{
 				int w = layer->clip.x1 - dstx1;
@@ -1185,14 +1193,31 @@ static bool DrawLayerObjectScanline(int nlayer, int nscan)
 			}
 			w = dstx2 - dstx1;
 
-			srcpixel = pixels + object->sprite->offset + (srcy*pitch) + srcx;
-			dstpixel = (uint32_t*)(dstscan + (dstx1 << 2));
-			layer->blitters[1] (srcpixel, layer->palette, dstpixel, w, 1, 0, layer->blend);
+			/* H/V flip */
+			if (object->flags & FLAG_FLIPX)
+			{
+				direction = -1;
+				srcx = object->width - srcx - 1;
+			}
+			if (object->flags & FLAG_FLIPY)
+				srcy = object->height - srcy - 1;
+
+			/* paint tile scanline */
+			srcpixel = get_bitmap_ptr(bitmap, srcx, srcy);
+			if (object->flags & FLAG_PRIORITY)
+			{
+				target = engine->priority;
+				priority = true;
+			}
+			else
+				target = dstscan;
+			dstpixel = (uint32_t*)(target + (dstx1 << 2));
+			layer->blitters[1] (srcpixel, bitmap->palette, dstpixel, w, direction, 0, layer->blend);
 		}
 		object = object->next;
 	}
 
-	return true;
+	return priority;
 }
 
 /* draw modes */
@@ -1221,7 +1246,7 @@ ScanDrawPtr GetLayerDraw(Layer* layer)
 		return drawers[DRAW_TILED_LAYER][layer->mode];
 	else if (layer->bitmap != NULL)
 		return drawers[DRAW_BITMAP_LAYER][layer->mode];
-	else if (layer->spriteset != NULL)
+	else if (layer->objects != NULL)
 		return drawers[DRAW_OBJECT_LAYER][layer->mode];
 	else
 		return NULL;
